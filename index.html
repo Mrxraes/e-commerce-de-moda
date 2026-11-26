@@ -137,7 +137,7 @@ footer p,footer a{display:block;font-size:14px;opacity:.8;margin-bottom:4px}
 <div class="mod" id="mod"><div id="modc"></div></div>
 
 <button class="cb" onclick="chat()" aria-label="Abrir ajuda">Ajuda</button>
-<div class="cp" id="cp" role="dialog" aria-label="Ajuda"><h4>Ajuda KAVEN <button class="ib" onclick="chat()">Fechar</button></h4><div class="cm" id="cm" aria-live="polite"></div><div class="chips" id="chips"></div><form class="cf" onsubmit="return ask(event)"><input id="ci" placeholder="Digite sua dúvida" aria-label="Sua dúvida"><button class="btn solid">Enviar</button></form></div>
+<div class="cp" id="cp" role="dialog" aria-label="Ajuda"><h4>Ajuda KAVEN <button class="ib" onclick="chat()">Fechar</button></h4><div class="cm" id="cm" aria-live="polite"></div><div class="chips" id="chips"></div><div class="cf"><input id="ci" onkeydown="if(event.key==='Enter')ask(event)" placeholder="Digite sua dúvida" aria-label="Sua dúvida"><button type="button" class="btn solid" onclick="ask(event)">Enviar</button></div></div>
 <script>
 addEventListener('load',e=>{const i=e.target,b=i.tagName==='IMG'&&i.closest('.ph,.c');if(!b||!i.naturalWidth)return;try{const c=document.createElement('canvas');c.width=i.naturalWidth;c.height=i.naturalHeight;const x=c.getContext('2d');x.drawImage(i,0,0);const f=(px,py)=>{const d=x.getImageData(px,py,1,1).data;return `rgb(${d[0]},${d[1]},${d[2]})`};b.style.background=`linear-gradient(${f(2,2)},${f(2,c.height-3)})`}catch(_){}},true);
 const BRL=n=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -273,16 +273,47 @@ function INSTR(){
 }
 let AI,hist=[];
 async function reply(q){
-  try{if(AI===undefined)AI=(window.claude&&await claude.use('sample'))||null}catch(e){AI=null}
-  if(!AI)return kw(q);
+  try{if(AI===undefined)AI=(window.claude&&await Promise.race([claude.use('sample'),new Promise(r=>setTimeout(r,2500))]))||null}catch(e){AI=null}
+  if(!AI)return brain(q);
   const d=document.createElement('div');d.className='bb bot';d.textContent='Digitando…';$('#cm').appendChild(d);$('#cm').scrollTop=1e9;
   try{
-    const r=await AI(INSTR()+'\n\nConversa até agora:\n'+hist.slice(-6).join('\n')+'\nCliente: '+q+'\nAssistente:',{cache:false,modelTier:'quick'});
+    const r=await Promise.race([AI(INSTR()+'\n\nConversa até agora:\n'+hist.slice(-6).join('\n')+'\nCliente: '+q+'\nAssistente:',{cache:false,modelTier:'quick'}),new Promise((_,j)=>setTimeout(j,7000))]);
     d.remove();const t=(r.text||'').trim();hist.push('Cliente: '+q);
     if(!t||t.includes('[CONTATO]')){hist.push('Assistente: (encaminhou para contato)');return contact(q)}
     hist.push('Assistente: '+t);say(t,'bot');
-  }catch(e){d.remove();kw(q)}
+  }catch(e){d.remove();brain(q)}
 }
+// Cérebro do chat (funciona sem internet e sem chave de API): entende erros de digitação, busca produtos, calcula parcelas e indica tamanho.
+const lev=(a,b)=>{const m=[...Array(b.length+1).keys()];for(let i=1;i<=a.length;i++){let p=i-1;m[0]=i;for(let j=1;j<=b.length;j++){const t=m[j];m[j]=Math.min(m[j]+1,m[j-1]+1,p+(a[i-1]===b[j-1]?0:1));p=t}}return m[b.length]};
+const near=(x,k)=>x===k||(k.length>4&&x.length>3&&lev(x,k)<=(k.length>7?2:1));
+const SYN={camisetas:'camiseta tee',camisas:'camisa',moletons:'moletom hoodie canguru blusa',calcas:'calca jeans jogger pantalona chino',bermudas:'bermuda short shorts jorts',jaquetas:'jaqueta bomber trucker casaco',calcados:'tenis sapato mocassim sneaker calcado',acessorios:'bone relogio oculos cinto acessorio'};
+const COLS={preto:'preto preta black',bege:'bege areia',verde:'verde oliva militar',cinza:'cinza grafite'};
+const MEM={};
+function brain(q){
+  const n=' '+norm(q).replace(/[^a-z0-9$,. ]+/g,' ')+' ',w=n.split(/[^a-z0-9]+/).filter(Boolean),has=l=>l.split(' ').some(k=>w.some(x=>near(x,k)));
+  const nums=[...n.matchAll(/\d+(?:[.,]\d+)?/g)].map(m=>+m[0].replace(',','.'));
+  if(/parcel|prestac|vezes|juros|\d\s*x /.test(n)){
+    const x=n.match(/(\d{1,2})\s*(x|vezes)/),val=nums.find(v=>v>=50&&!(x&&v===+x[1]))||sub();
+    if(x&&val){const k=Math.min(12,Math.max(1,+x[1])),pc=parc(val,k);return say(`${BRL(val)} em ${k}x: ${k}x de ${BRL(pc)}`+(k<=6?', sem juros.':` (total ${BRL(pc*k)}, com juros de ${(JUROS*100).toFixed(2).replace('.',',')}% ao mês).`),'bot')}
+    if(val)return say(`Com ${BRL(val)}: 3x de ${BRL(parc(val,3))} e 6x de ${BRL(parc(val,6))}, ambos sem juros. Em 12x fica ${BRL(parc(val,12))} por mês, com juros.`,'bot');
+    return say('Parcelamos no cartão ou boleto em até 12x: de 1x a 6x sem juros e, da 7ª parcela em diante, com juros. Me diga um valor (ex.: "1200 em 10x") que eu calculo.','bot')}
+  if(/tamanho|medida|veste|numer|caimento|ficar/.test(n)){
+    const h=nums.find(v=>v>=140&&v<=210)||(nums.find(v=>v>=1.4&&v<=2.1)||0)*100,kg=nums.find(v=>v>=40&&v<=160&&v!==h);
+    if(kg){const z=kg<62?'P':kg<76?'M':kg<90?'G':'GG';return say(`Pelos seus dados${h?' (altura '+Math.round(h)+' cm)':''}, o ${z} deve servir. O caimento da KAVEN é amplo: se preferir mais ajustado, desça um tamanho. Calçados seguem a sua numeração (39 a 43).`,'bot')}
+    if(!/numer|calcad|tenis/.test(n))return say('Me diga sua altura e peso (ex.: 1,78 e 75 kg) que eu indico o tamanho. As peças são de caimento amplo.','bot')}
+  let cats=Object.keys(SYN).filter(c=>has(SYN[c])),cols=Object.keys(COLS).filter(c=>has(COLS[c]));const mx=n.match(/(ate|menos de|abaixo de|maximo)\s*(?:r\$?\s*)?(\d+)/);
+  if(!cats.length&&MEM.cat&&(mx||cols.length||/barat|caro|outro|mais/.test(n)))cats=[MEM.cat];
+  if(cats.length||cols.length||mx){
+    let L=P.filter(p=>(!cats.length||cats.includes(p.c))&&(!cols.length||cols.some(c=>COLS[c].split(' ').some(k=>norm(p.n).includes(k))))&&(!mx||p.p<=+mx[2]));
+    if(/barat/.test(n))L.sort((a,b)=>a.p-b.p);if(/caro|premium/.test(n))L.sort((a,b)=>b.p-a.p);
+    if(!L.length)return say('Não achei nada com esse filtro. Quer tentar outra cor ou um valor maior?','bot');
+    MEM.cat=cats[0]||MEM.cat;MEM.prod=L[0];
+    return say('Olha o que encontrei:<br>'+L.slice(0,3).map(p=>`• <a href="#${p.c}">${p.n}</a> · ${BRL(p.p)}`).join('<br>')+(cats[0]?`<br><a href="#${cats[0]}">Ver toda a seção ${catName(cats[0])}</a>`:''),'bot',true)}
+  if(MEM.prod&&/quanto|preco|custa|valor/.test(n))return say(`${MEM.prod.n} custa ${BRL(MEM.prod.p)} (ou 6x de ${BRL(MEM.prod.p/6)} sem juros).`,'bot');
+  if(/obrigad|valeu|tchau|ate mais/.test(n))return say('Por nada! Qualquer dúvida é só chamar.','bot');
+  let best=null,sc=0;for(const [ks,a] of KB){const z=ks.filter(k=>k.includes(' ')?n.includes(' '+k+' '):w.some(x=>near(x,k))).length;if(z>sc){sc=z;best=a}}
+  if(best)return say(best,'bot');
+  contact(q)}
 function kw(q){
   const w=norm(q).split(/[^a-z0-9]+/),n=' '+w.join(' ')+' ';let best=null,sc=0;
   for(const [ks,a] of KB){const s=ks.filter(k=>k.includes(' ')?n.includes(' '+k+' '):w.includes(k)).length;if(s>sc){sc=s;best=a}}
@@ -293,7 +324,7 @@ function contact(q){
   say('Não sei responder isso por aqui. Fale com a gente:<a href="https://wa.me/'+WA+'?text='+m+'" target="_blank" rel="noopener">WhatsApp</a><a href="mailto:'+MAIL+'?subject='+encodeURIComponent('Dúvida')+'&body='+m+'">E-mail: '+MAIL+'</a>','bot',true);
 }
 function ask(e){e.preventDefault();const v=$('#ci').value.trim();if(!v)return false;say(v,'me');$('#ci').value='';reply(v);return false}
-function chat(){const p=$('#cp');p.classList.toggle('on');if(p.classList.contains('on')&&!$('#cm').children.length){say('Olá! Sou o assistente da KAVEN. Sobre o que você quer saber?','bot');$('#chips').innerHTML=['Frete','Pagamento','Trocas','Tamanhos'].map(c=>`<button onclick="say('${c}','me');reply('${c}')">${c}</button>`).join('');$('#ci').focus()}}
+function chat(){const p=$('#cp');p.classList.toggle('on');if(p.classList.contains('on')&&!$('#cm').children.length){say('Olá! Sou o assistente da KAVEN. Sobre o que você quer saber?','bot');$('#chips').innerHTML=['Frete','Parcelamento','Qual tamanho?','Jaquetas até 350','Trocas'].map(c=>`<button onclick="say('${c}','me');reply('${c}')">${c}</button>`).join('');$('#ci').focus()}}
 count();view();
 </script>
 </body>
